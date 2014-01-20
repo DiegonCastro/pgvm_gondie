@@ -1,0 +1,316 @@
+#!/usr/bin/env bash
+
+# Copyright (c) 2012 Dickson S. Guedes.
+#
+# This module is free software; you can redistribute it and/or modify it under
+# the [PostgreSQL License](http://www.opensource.org/licenses/postgresql).
+#
+# Permission to use, copy, modify, and distribute this software and its
+# documentation for any purpose, without fee, and without a written agreement is
+# hereby granted, provided that the above copyright notice and this paragraph
+# and the following two paragraphs appear in all copies.
+#
+# In no event shall Dickson S. Guedes be liable to any party for direct,
+# indirect, special, incidental, or consequential damages, including lost
+# profits, arising out of the use of this software and its documentation, even
+# if Dickson S. Guedes has been advised of the possibility of such damage.
+#
+# Dickson S. Guedes specifically disclaims any warranties, including, but not
+# limited to, the implied warranties of merchantability and fitness for a
+# particular purpose. The software provided hereunder is on an "as is" basis,
+# and Dickson S. Guedes has no obligations to provide maintenance, support,
+# updates, enhancements, or modifications.
+
+shopt -s expand_aliases
+
+case $OSTYPE in
+    darwin*)
+        alias md5sum=create_osx_md5
+    ;;
+esac
+
+action_exists()
+{
+	[[ -f "${pgvm_home}/actions/$1" ]]
+}
+
+execute_action()
+{
+	action=$1
+
+	if action_exists $action
+	then
+		source $pgvm_home/actions/$action
+		shift
+
+		$action $@
+	else
+		execute_action help
+	fi
+}
+
+parse_options()
+{
+  for opt in $*
+  do
+    opt=$(echo $opt | sed 's/--/opt_/g' | sed 's/-/_/g')
+    value=$(echo $opt | cut -s -d'=' -f2)
+    opt=$(echo $opt | cut -d'=' -f1)
+    value=${value:-1}
+    eval "export $opt=$value"
+  done
+}
+
+get_curl_cmd()
+{
+  curl_cmd=$1
+  shift
+  url=$1
+  shift
+  file=$1
+  shift
+
+  parse_options $*
+
+  if [ ! -z $opt_silent ]
+  then
+    curl_cmd="$curl_cmd --silent"
+  fi
+
+  if [ ! -z $opt_location ]
+  then
+    curl_cmd="$curl_cmd --location"
+  fi
+
+  if [ ! -z $opt_continue ]
+  then
+    curl_cmd="$curl_cmd -C -"
+  fi
+
+  if [ ! -z $opt_check_timestamp ] && [ "$file" != "-" ]
+  then
+    curl_cmd="$curl_cmd -z $file"
+  fi
+
+  curl_cmd="$curl_cmd -o $file $url"
+
+  echo $curl_cmd
+}
+
+get_wget_cmd()
+{
+  wget_cmd=$1
+  shift
+  url=$1
+  shift
+  file=$1
+  shift
+
+  parse_options $*
+
+  if [ ! -z $opt_silent ]
+  then
+    wget_cmd="$wget_cmd --quiet"
+  fi
+
+  if [ ! -z $opt_continue ]
+  then
+    wget_cmd="$wget_cmd -c"
+  fi
+
+  if [ ! -z $opt_check_timestamp ]
+  then
+    wget_cmd="$wget_cmd -N"
+  fi
+
+  wget_cmd="$wget_cmd -O $file $url"
+
+  echo $wget_cmd
+}
+
+download()
+{
+  url=$1
+  shift
+  file=$1
+  shift
+
+  download_cmd=$(which curl)
+  download_cmd=${download_cmd:-$(which wget)}
+  name_cmd=$(basename "$download_cmd")
+
+  if [ "$name_cmd" != "" ]
+  then
+    download_cmd=$(get_${name_cmd}_cmd $download_cmd $url "$file" $*)
+  else
+    echo "\nDownload command not found!"
+    exit 1
+  fi
+
+  $download_cmd 2>/dev/null
+}
+
+seems_to_be_from_repo()
+{
+  version=${1:-$version}
+  echo $version | egrep "^[0-9a-f]{7,40}$|^REL([[:digit:]])+_([[:digit:]])+_([[:alnum:]])+(_BRANCH)?$|^master$" &>/dev/null
+  [[ $? -eq 0 ]]
+}
+
+local_repo_exists()
+{
+  pg_dest_dir=$pgvm_home/src/postgresql-clone
+  cd $pg_dest_dir 2>/dev/null && grep -i postgresql README &>/dev/null && git status &>/dev/null
+}
+
+checkout_postgres()
+{
+  version=$1
+  pg_clone_dir=$pgvm_home/src/postgresql-clone
+  cd $pg_clone_dir && git checkout $version &>/dev/null && git clean -f &>/dev/null
+
+  [[ $? -eq 1 ]] && echo "the branch '$version' seems to be invalid." && exit 1
+}
+
+clone_postgres()
+{
+  pg_dest_dir=$pgvm_home/src
+  pg_url=$(git_repo_url $version)
+
+  echo "getting postgres from '$pg_url'"
+
+  mkdir -p $pg_dest_dir
+
+  git clone $pg_url $pg_dest_dir/postgresql-clone
+}
+
+get_postgres()
+{
+   version=${1:-$version}
+   version_length=$(echo $version|wc -c)
+
+   if [ $version_length -eq 4 ]
+   then
+      version=$(download http://www.postgresql.org/versions.rss - | grep "is the latest release in the" | sed "s/^.*\([0-9]\.[0-9]\+\.[0-9]\+\) is the latest release in the \([0-9]\.[0-9]\+\).*/\1/" |grep $version)
+   elif [ $version_length -eq 2 ]
+   then
+      version=$(download http://www.postgresql.org/versions.rss - | grep "is the latest release in the" | sed "s/^.*\([0-9]\.[0-9]\+\.[0-9]\+\) is the latest release in the \([0-9]\.[0-9]\+\).*/\1/" |grep ^"$version"|head -n1)
+   fi
+
+   pg_dest_dir=$pgvm_home/src
+   pg_url=$(postgres_download_url $version)
+
+   mkdir -p $pg_dest_dir
+
+   cd $pg_dest_dir
+
+   if [ ! -e postgresql-$version.tar.gz ]; then
+	   echo -n "downloading '$pg_url', please be patient... "
+	   download $pg_url postgresql-$version.tar.gz --silent --location --continue --check-timestamp
+	   download $pg_url.md5 postgresql-$version.tar.gz.md5 --silent --location --continue --check-timestamp
+	   echo "done."
+   fi
+
+   echo -n "checking 'postgresql-$version.tar.gz' integrity... "
+
+   md5sum -c postgresql-$version.tar.gz.md5 >/dev/null 2>/dev/null
+
+   [[ $? -ne 0 ]] && echo "ERRO: CHECKSUM of 'postgresql-$version.tar.gz' has failed! Aborting!" && rm postgresql-$version.tar.gz* && exit 1
+   echo "done."
+}
+
+extract_postgres()
+{
+   version=${1:-$version}
+   pg_dest_dir=$pgvm_home/src
+
+   cd $pg_dest_dir
+
+   echo -n "extracting postgresql-$version.tar.gz ... "
+   tar zxvf postgresql-$version.tar.gz >/dev/null
+   [[ $? -ne 0 ]] && echo "ERRO: can not extract file 'postgresql-$version.tar.gz'" && exit 1
+   echo "done."
+}
+
+compile_and_install_postgres()
+{
+   version=${1:-$version}
+   configure_options=${CONFIG_OPTS}
+   make_options=${MAKE_OPTS}
+   pg_dest_dir=$pgvm_home/src
+
+   if seems_to_be_from_repo $version
+   then
+     pg_dest_dir=$pg_dest_dir/postgresql-clone
+     cd $pg_dest_dir
+     make clean 1>make-clean.clean.log 2>make-clean.error.log
+   else
+     pg_dest_dir=$pg_dest_dir/postgresql-$version
+   fi
+
+   cd $pg_dest_dir
+   mkdir -p $pgvm_home/environments/$version
+
+   echo -n "configuring PostgreSQL Version: $version ... "
+   ./configure --prefix=$pgvm_home/environments/$version ${configure_options} --silent
+   echo "done."
+
+   echo -n "compiling ... "
+   make ${make_options} 1>make.log 2>make.error.log
+   [[ $? -ne 0 ]] && echo "ERRO: can not compile PostgreSQL $version, see make.error.log for details." && exit 1
+   echo "done."
+
+   echo -n "installing ... "
+   make install 1>make_install.log 2>make_install.error.log
+   [[ $? -ne 0 ]] && echo "ERRO: can not install PostgreSQL $version" && exit 1
+   echo "done."
+}
+
+version_is_installed()
+{
+   version=${1:-$version}
+
+   [[ -d "${pgvm_home}/environments/$version" ]]
+}
+
+create_symlinks()
+{
+   check_env
+
+   version=${1:-$version}
+   mkdir --parents $pgvm_home/environments
+   ln --no-dereference --force --symbolic $pgvm_home/environments/$version $pgvm_home/environments/current
+   builtin hash -r
+}
+
+check_env()
+{
+   [[ -z $pgvm_home ]] && echo "\$pgvm_home is not set!" && exit 1
+}
+
+create_osx_md5()
+{
+    shift
+    pg_file=$1
+    md5hash=( `cat $pg_file` `md5 -r ${pg_file/.md5/}` )
+
+    echo ${md5hash[2]}
+    echo ${md5hash[0]}
+
+    [[ ${md5hash[0]} == ${md5hash[2]} ]] && echo ${md5hash[1]}: "SUCCESS" || exit 1
+}
+
+load_conf()
+{
+    files="/etc/pgvmrc $HOME/.pgvmrc"
+
+    for file in $files
+    do
+        if [ -f $file ]
+        then
+            source $file
+            export PGVMRC=$file
+            break
+        fi
+    done
+}

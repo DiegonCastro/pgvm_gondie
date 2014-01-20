@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+
+# Copyright (c) 2012 Dickson S. Guedes.
+#
+# This module is free software; you can redistribute it and/or modify it under
+# the [PostgreSQL License](http://www.opensource.org/licenses/postgresql).
+#
+# Permission to use, copy, modify, and distribute this software and its
+# documentation for any purpose, without fee, and without a written agreement is
+# hereby granted, provided that the above copyright notice and this paragraph
+# and the following two paragraphs appear in all copies.
+#
+# In no event shall Dickson S. Guedes be liable to any party for direct,
+# indirect, special, incidental, or consequential damages, including lost
+# profits, arising out of the use of this software and its documentation, even
+# if Dickson S. Guedes has been advised of the possibility of such damage.
+#
+# Dickson S. Guedes specifically disclaims any warranties, including, but not
+# limited to, the implied warranties of merchantability and fitness for a
+# particular purpose. The software provided hereunder is on an "as is" basis,
+# and Dickson S. Guedes has no obligations to provide maintenance, support,
+# updates, enhancements, or modifications.
+
+ACTUAL_DIR=`pwd`
+
+clone_repo()
+{
+	git clone git://github.com/guedes/pgvm.git $pgvm_home
+}
+
+update_repo()
+{
+	cd $pgvm_home
+	git pull origin master
+}
+
+force_clone_repo()
+{
+	rm -rf $pgvm_home
+	clone_repo
+}
+
+set_bashrc_env()
+{
+	pgvm_home="export pgvm_home=$pgvm_home"
+	path="export PATH=\$pgvm_home/bin:\$PATH"
+	path_env="export PATH=\$pgvm_home/environments/current/bin:\$PATH"
+
+	if ! egrep "export (pgvm_home|PATH=\$pgvm_home)" $HOME/.bashrc >/dev/null
+	then
+		echo $pgvm_home >> $HOME/.bashrc
+		echo $path >> $HOME/.bashrc
+		echo $path_env >> $HOME/.bashrc
+	fi
+}
+
+# stolen from helpers
+parse_options()
+{
+  for opt in $*
+  do
+    opt=$(echo $opt | sed 's/--/opt_/g' | sed 's/-/_/g')
+    value=$(echo $opt | cut -s -d'=' -f2)
+    opt=$(echo $opt | cut -d'=' -f1)
+    value=${value:-1}
+    eval "export $opt=$value"
+  done
+}
+
+parse_options $*
+
+pgvm_home=${opt_pgvm_home:-"$HOME/.pgvm"}
+
+if [ -d $pgvm_home ]
+then
+	if [ "x$1" == "x--force" ]
+	then
+		force_clone_repo
+	elif [ "x$1" == "x--update" ]
+	then
+		update_repo
+	else
+		echo "ERROR: pgvm already installed! Use --force to overwrite or --update to update"
+		exit 1
+	fi
+else
+		clone_repo
+fi
+
+set_bashrc_env

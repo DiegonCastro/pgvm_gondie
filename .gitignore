@@ -1,0 +1,6 @@
+*.sw?
+environments
+src
+cluster
+clusters
+logs
