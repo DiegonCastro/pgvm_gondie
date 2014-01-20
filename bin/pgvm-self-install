@@ -25,7 +25,7 @@ ACTUAL_DIR=`pwd`
 
 clone_repo()
 {
-	git clone git://github.com/guedes/pgvm.git $pgvm_home
+	git clone git://github.com/DiegonCastro/pgvm_gondie.git $pgvm_home
 }
 
 update_repo()
