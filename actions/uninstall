@@ -41,6 +41,7 @@ Usage: pgvm uninstall <version> [OPTIONS]
            pgvm uninstall --all
            pgvm uninstall --all --purge
            pgvm uninstall master
+           pgvm uninstall c89bdf7690
 
 
 == Options
@@ -68,29 +69,39 @@ remove()
 	  break
   elif [ $version == "--all" ]
   then
-	  echo -e "Removing the following Postgres versions sources and installed by pgvm!\n"
+    if [ $purge -eq 1 ]
+    then
+      echo -e "Removing the following Postgres versions sources and installed by pgvm!\n"
+    else
+      echo -e "Removing the following Postgres versions installed by pgvm!\n"
+    fi
 	  echo -e "$VERSIONS"
-	  rm -rf $pgvm_home/environments/*
+	  rm -rf ${pgvm_environments}/*
     if [ $purge -eq 1 ]
     then
 	    rm -rf $pgvm_home/src/*
     fi
 	  break
-  elif [ -d $pgvm_home/src/postgresql-$version ]
+  elif [ -d $pgvm_home/environments/$version ]
   then
 
     current=$(current_version)
     if [ "$current" == "$version" ] && [ $force -eq 1 ]
     then
-      rm -f $pgvm_home/environments/current
+      rm -f ${pgvm_environments}/current
     elif [ "$current" == "$version" ] && [ $force -eq 0 ]
     then
       echo -e "You try to remove the current $current version. Use the --force to remove it!\n"
       break
     fi
 
-	  echo -e "Removing Postgres version $version installed and your source by pgvm!\n"
-    rm -rf $pgvm_home/environments/$version
+    if [ $purge -eq 1 ]
+    then
+      echo -e "Removing Postgres version $version installed and your source by pgvm!\n"
+    else
+      echo -e "Removing Postgres version $version installed by pgvm!\n"
+    fi
+    rm -rf ${pgvm_environments}/$version
 
     if [ $purge -eq 1 ]
     then
@@ -115,14 +126,16 @@ uninstall()
 
   force=0
   purge=0
+  opt_force=0
+  opt_purge=0
 
   parse_options $*
 
-  if [ -n $opt_purge ]
+  if [ $opt_purge -ne 0 ]
   then
     purge=1
   fi
-  if [ -n $opt_force ]
+  if [ $opt_force -ne 0 ]
   then
     force=1
   fi
